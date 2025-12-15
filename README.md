@@ -3,15 +3,18 @@ This repository contains the numerical solution and analysis for a complex, coup
 
 ---
 ## Scenario 1: a centered hill with an ignition point on its southwest aspect.
-![Boundary/scenario conditions showing topography and a wind map](../ICHill.png)
-![Initial $u$ (temperature) and $\beta$ (fuel)](../HillBegin.png)
-![A simple fire model over a centered hill with a steady ENE wind for $t_{span} = [0, 8]](simpleFire_hill.gif)
+![Boundary/scenario conditions showing topography and a wind map](report/ICHill.png)
+
+![Initial $u$ (temperature) and $\beta$ (fuel)](report/HillBegin.png)
+
+![A simple fire model over a centered hill with a steady ENE wind for $t_{span} = [0, 8]$](report/simpleFire_hill.gif)
 ---
 ## Scenario 2: A drainage with an ignition point in the base of the valley.
-![Boundary/scenario conditions showing topography and a wind map](../ICValley.png)
-![Initial $u$ (temperature) and $\beta$ (fuel)](../ValleyBegin.png)
-![A simple fire model over a centered drainage with a steady ENE wind for $t_{span} = [0, 8]$](simpleFire_Valley.gif)
+![Boundary/scenario conditions showing topography and a wind map](report/ICValley.png)
 
+![Initial $u$ (temperature) and $\beta$ (fuel)](report/ValleyBegin.png)
+
+![A simple fire model over a centered drainage with a steady ENE wind for $t_{span} = [0, 8]$](report/simpleFire_Valley.gif)
 ---
 
 ## 1. Project Overview and Core Mathematical Physics

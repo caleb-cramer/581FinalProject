@@ -1,0 +1,339 @@
+\documentclass{article} 
+
+\usepackage{float}
+\usepackage{amsmath} 
+\usepackage{amssymb} 
+\usepackage{geometry} 
+\geometry{a4paper} 
+\usepackage{graphicx} % Needed for including plots
+\usepackage{listings} % For clean code blocks
+\usepackage{xcolor}
+\usepackage[backend=bibtex]{biblatex}
+\bibliography{biblio.bib} 
+
+
+% Set up for Python code listing
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codebackground}{rgb}{0.95,0.95,0.95}
+\lstset{
+    backgroundcolor=\color{codebackground}, 
+    commentstyle=\color{codegray},
+    keywordstyle=\color{blue},
+    stringstyle=\color{red},
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    numbers=left,
+    numbersep=5pt,
+    numberstyle=\tiny\color{codegray},
+    showstringspaces=false,
+    language=Python,
+}
+
+\usepackage{geometry} 
+\geometry{
+    a4paper,
+    margin=1in} % Sets all margins to 1 inch
+
+\title{581 Final Report} 
+\author{Caleb Cramer} 
+\date{December 10, 2025}
+
+\begin{document}
+\maketitle
+
+\section{Motivations and Problem Background}
+
+As a resident of the Pacific Northwest, I've watched the wildfire crisis evolve from a occasional occurrence into a annual disruption. For the last decade, the late summer has consistently brought weeks where the air quality index is so hazardous even basic outdoor activity is ill-advised. Beyond the public health impacts, this crisis is deeply personal: I have family and friends serving as wildland first responders, giving me a close perspective on the escalating ferocity and unpredictability of these events.
+
+This phenomenon is entangled in politics, land rights, ecology and other domains but the physics is rooted in the complex, non-linear behavior of combustion and fluid dynamics.  My motivation for this project is to attempt a quantitative understanding of these physics. The central challenge is to accurately model the coupled system of heat diffusion, wind-driven convection, and fuel depletion that dictates a fire's spread. I aim to leverage the advanced numerical techniques learned this quarter to discretize this challenging, coupled Reaction-Diffusion-Convection (RDC) system.
+
+While real-world fire models are vast in complexity, this project focuses on the core mathematical physics governing fire spread based on topography, wind, and fuel. This approach required certain simplifications, similar to those outlined in the foundational works of the domain, such as the modeling decisions made by \cite{wildfireSpread}, which served as a major inspiration and technical reference for this implementation.
+
+\textbf{Goal}: Model a wildfire (temperature and remaining fuel) which starts at a particular location $[x_{start},y_{start}]$ across a span of time $[0,t_{end}]$. 
+
+\section{Definitions and Explanations}
+
+\textbf{Parameters}
+\begin{itemize}
+\item $[x,y]$ = spatial domain in question
+\item $[0,t_{end}]$ = time evaluation range
+\item $k$ = diffusion coefficient
+\item $\epsilon$ = the inverse of the activation energy of the fuel
+\item $\alpha$ = natural convection coefficient
+\item $q$ = reaction heat
+\item $u_{pc}$ = phase change threshold
+\end{itemize}
+
+\textbf{Functions}
+
+\begin{itemize}
+\item$u(x,y,t) = u_{x,y,t} = k\Delta u - \upsilon \cdot \nabla u + f(u,\beta)$ \textrightarrow{} temperature at time t and location x,y
+\begin{itemize}
+\item $f(u,\beta) = \mathcal{H}_{pc}(u) \beta e^{\frac{u}{1+\epsilon u}} - \alpha u$ \textrightarrow{} nonlinear heat source
+\item	$\mathcal{H}_{pc}$ is the Heaviside function centered at $u_{pc}$
+\end{itemize}
+\item $\beta(x,y,t) = \beta_{x,y,t}$ \textrightarrow{} amount of fuel left at time t and location x,y
+\begin{itemize}
+\item$g(u,\beta)  = -\mathcal{H}_{pc}(u) \frac{\epsilon}{q} \beta e^{\frac{u}{1+\epsilon u}}$
+\end{itemize}
+\item $\upsilon(x,y,t)$ = $w(t) + \nabla Z(x,y)$ \textrightarrow{} wind and topography vector field
+\begin{itemize}
+\item $w(t)$ \textrightarrow{} vector field correlating to the wind at time t
+\item $Z(x,y)$ \textrightarrow{} vector field correponding to topography at time t and location x,y
+\end{itemize}
+\end{itemize}
+
+\section{Mathematical Model: Coupled Reaction-Diffusion-Convection System}
+
+The wildfire spread is modeled by a system of two coupled Partial Differential Equations (PDEs) for temperature, $u_{x,y,t}$, 
+and fuel concentration, $\beta_{x,y,t}$. This model captures the key physical phenomena: heat diffusion, advection (convection) due to wind/topography, and a nonlinear reaction source/sink term.
+
+The system is given by:
+\begin{align}
+\label{eq:temp_pde}
+\frac{\partial u}{\partial t} &= k\Delta u - \upsilon \cdot \nabla u + f(u,\beta) \\
+\frac{\partial \beta}{\partial t} &= g(u,\beta)
+\end{align}
+where $k\Delta u$ is the diffusion term, $-\upsilon \cdot \nabla u$ is the convection/advection term, and $f(u,\beta)$ and $g(u,\beta)$ are the nonlinear reaction terms defined in the Problem Setup.
+
+\subsection{Nonlinear Reaction Approximation}
+
+The model uses the Heaviside step function, $\mathcal{H}_{pc}(u)$, which introduces a discontinuity at the phase change threshold $u_{pc}$ (ignition temperature). To ensure the system is stable with standard ODE/PDE solvers (like the Runge-Kutta method used) without stalling at the discontinuity, the Heaviside function is replaced by a smoothed Heaviside function based on the sigmoid (hyperbolic tangent) function:
+\begin{equation}
+\mathcal{H}_{pc}(u) \approx H(u) = 0.5 \left( \tanh(c (u - u_{pc})) + 1 \right)
+\end{equation}
+where $c=50$ is a steepness parameter used in the implementation to approximate a sharp transition.
+
+This was based on research after I ran into stiffness with my system which was causing LSODA and BDF to fail.  I discovered the 'sigmoid' approach taken by Miao Cui et al. in \cite{phaseTransfer}.
+
+\section{Numerical Method: Method of Lines}
+
+The coupled PDE system is solved using the Method of Lines (MoL). This technique transforms the system of PDEs into a large system of ordinary differential equations (ODEs) by discretizing the spatial derivatives while leaving the time derivative continuous.  I chose to use Finite Difference instead of Spectral Methods due to the non-linearity of $f(u,\beta)$ and $g(u,\beta)$ as well as the Neumann Boundary Conditions.  We solved this exact situation in class but for this implementation I elected to start simple and iterate when possible.  It also saved me the time and effort of converting back and forth from the spectral doamin to the spatial domain to account for the non-linear terms.
+
+\subsection{Spatial Discretization (Finite Differences)}
+
+The spatial domain is a $2L \times 2L$ square discretized on an $m \times m$ grid, resulting in a total of $N = m^2$ interior grid points. With $m=250$, the system size for $u$ and $\beta$ is $2 \times N = 125,000$. The spatial step size is $\delta = \frac{2L}{m-1}$. 
+
+
+\subsubsection{Diffusion Operator (Laplacian)}
+The 2D Laplacian operator, $\Delta = \frac{\partial^2}{\partial x^2} + \frac{\partial^2}{\partial y^2}$, is constructed using the Kronecker product of sparse 1D finite difference matrices.
+\begin{itemize}
+    \item 1D Laplacian ($D_{2\_1d}$): A three-point stencil (similar to HW3) is used for the 1D second derivative.
+    \item Boundary Conditions: Neumann Boundary Conditions ($\nabla u \cdot \mathbf{n} = 0$, or zero flux at the edges) are enforced by modifying the first and last rows of the 1D operator, effectively mirroring the internal points. I had to add these manually when I noticed Setup 2 (described later) was causing issues at the boundaries.  I used a flattened mask to set all boundary points to 0.
+    \item 2D Laplacian ($L_{2D}$): The final operator is $L_{2D} = (I \otimes D_{2\_1d}) + (D_{2\_1d} \otimes I)$, where $I$ is the $m \times m$ identity matrix and $\otimes$ is the Kronecker product. This method correctly applies the derivatives across the flattened $m^2$ vector of grid points.
+\end{itemize}
+
+\subsubsection{Convection Operators (Gradient)}
+The 2D gradient operators ($\nabla = (\frac{\partial}{\partial x}, \frac{\partial}{\partial y})$) are constructed using the Central Difference scheme for first derivatives.
+\begin{itemize}
+    \item 1D Gradient ($D_{1\_1d}$): Uses the stencil $\frac{1}{2\delta}(u_{i+1} - u_{i-1})$.
+    \item 2D Gradient ($D_x, D_y$): $D_x = I \otimes D_{1\_1d}$ and $D_y = D_{1\_1d} \otimes I$.
+\end{itemize}
+The advection term is computed by element-wise multiplication with the velocity components:
+\begin{equation}
+\mathbf{v} \cdot \nabla u \approx V_x \odot (\mathbf{D_x} u) + V_y \odot (\mathbf{D_y} u)
+\end{equation}
+where $V_x$ and $V_y$ are the flattened $m^2$ vectors of the velocity field $\upsilon(x,y,t)$ components.
+
+\subsection{Time Integration (ODE Solver)}
+The resulting system of ODEs, $\frac{d\mathbf{Y}}{dt} = F(t, \mathbf{Y})$, where $\mathbf{Y} = [\mathbf{u}; \mathbf{\beta}]$, is solved using \verb|scipy.integrate.solve_ivp| with the RK23 (Runge-Kutta of order 2(3)) method.  I tested with RK45 and didn't get any different results.
+
+\section{Implementation and Results}
+
+\subsection{Key Parameters}
+
+The following dimensionless parameters were used in the simulation:
+\begin{itemize}
+    \item Grid Size ($m$): 250
+    \item Domain Length ($L$): 20.0 (Domain is $[-20, 20] \times [-20, 20]$)
+    \item Diffusion Coefficient ($k$): 0.1
+    \item Inverse Activation Energy ($\epsilon$): 0.2
+    \item Natural Convection Coefficient ($\alpha$): 0.05
+    \item Reaction Heat ($q$): 1.0
+    \item Phase Change Threshold ($u_{pc}$): 0.1
+    \item Time Span ($t_{span}$): 8
+\end{itemize}
+
+\subsection{Initial Conditions}
+\begin{itemize}
+\item Initial Spark at (-5,5) (setup 1): $u_{x,y,0} = 3e^{-\frac{(X+5)^{2}+(Y+5)^{2}}{2}}$
+\item Initial Spark at (-15,0) (setup 2): $u_{x,y,0} = 3e^{-\frac{(X+15)^{2}+Y^{2}}{2}}$ 
+\item Fuel Distribution: $\beta_{x,y,0} = 1$
+\item Constant ENE wind: $x_{mag} = 0.8$ and $y_{mag} = 0.3$
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ICHill.png}
+    \caption{Initial setup for a hill of height 3 and radius 5 as defined by $Z_{hill} = 3 - 3e^{-\frac{X^{2}+Y^{2}}{50}}$}
+    \label{fig:ICHill}
+\end{figure}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{HillBegin.png}
+    \caption{Initial state of the fire with setup 1.  Left shows an initial spark and the evolution of $u(x,y,t)$ and right shows $\beta(x,y,t)$,  the fuel remaining.}
+    \label{fig:initialState1}
+\end{figure}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ICValley.png}
+    \caption{Initial setup for a valley of depth 5 as defined by $Z_{valley} = 3 - 3e^{-\frac{\frac{1}{2}X+\frac{1}{5}Y^{2}}{10}}$ }
+    \label{fig:ICvalley}
+\end{figure}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ValleyBegin.png}
+    \caption{Initial state of the fire with setup 2,  a valley mirrored about the y-axis and a new spark location. Left shows an initial spark and the evolution of $u(x,y,t)$ and right shows $\beta(x,y,t)$,  the fuel remaining.}
+    \label{fig:initialState2}
+\end{figure}
+
+
+
+\subsection{Numerical Performance}
+
+The problem was discretized into a system of $2 \times 250^2 = 125,000$ ODEs. The full system size for the linear operators (like the Laplacian) is $(62500, 62500)$. The sparsity of the Finite Difference operators allows for efficient matrix-vector products. The solution was obtained in 3.26 seconds using the \verb|solve_ivp| routine.
+
+\subsection{Time Series Plots}
+See Figure \ref{fig:initialState1} for initial state of the system under setup 1, Figure \ref{fig:middleState1} for $ t = 3.79$,  and Figure \ref{fig:fullState1} for  $ t = 8.00$.\\
+See Figure \ref{fig:initialState2} for initial state of the system under setup 2,  Figure \ref{fig:middleState2} for $ t = 3.79$,  and Figure \ref{fig:fullState2} for  $ t = 8.00$.
+
+\section{Core Implementation Code}
+
+The central part of the Method of Lines implementation is the Right Hand Side (RHS) function, which computes the time derivatives $\frac{du}{dt}$ and $\frac{d\beta}{dt}$ for the ODE solver.
+
+\begin{lstlisting}
+def smoothed_heaviside(u, threshold, c=50):
+    # Sigmoid approximation of Heaviside step function.
+    return 0.5 * (np.tanh(c * (u - threshold)) + 1)
+
+def reaction_rate(u, beta):
+    # Arrhenius term: exp(u / (1 + eps*u))
+    arrhenius = np.exp(u / (1 + epsilon * u))
+    # Threshold: Fire only burns if u > u_pc
+    H = smoothed_heaviside(u, u_pc)
+    return H * beta * arrhenius
+
+def model_rhs(t, state):
+    """
+    Right Hand Side of the PDE system.
+    State is a vector of size 2*m*m (Temperature followed by Fuel).
+    """
+    n = m * m
+    u = state[:n]     # Temperature (vectorized)
+    beta = state[n:]  # Fuel (vectorized)
+
+    # 1. Diffusion: k * Laplacian * u
+    diff_term = k * (Laplacian @ u)
+
+    # 2. Convection: - v . grad(u)
+    adv_term = - (Vx * (Dx @ u) + Vy * (Dy @ u))
+
+    # 3. Reaction Term (rr = H * beta * exp(...) )
+    rr = reaction_rate(u, beta)
+    
+    # Heat Source: f_u = Reaction - Cooling
+    f_u = rr - alpha * u
+    
+    # Fuel Consumption: g_beta = -(epsilon / q) * rr
+    g_beta = -(epsilon / q) * rr
+
+    du_dt = diff_term + adv_term + f_u
+    dbeta_dt = g_beta
+
+    return np.concatenate([du_dt, dbeta_dt])
+\end{lstlisting}
+
+\section{Discussion and Extensions}
+I heavily relied on concepts from this quarter to build this project, including:
+\begin{itemize}
+\item Python Basics and Visualization
+\begin{itemize}
+\item I utilized Python's libraries to generate informative plots and GIFs, essential for visualizing the 3D time evolution of the temperature and the underlying vector fields that drive the fire spread.
+\item Efficient matrix operations from $\text{NumPy}$ and $\text{SciPy}$ were crucial for rapidly calculating the derivatives across the entire computational grid.
+\item The proper reshaping of multi-dimensional arrays and vectors was required to translate the $2D$ spatial grid data into the $1D$ vector format necessary for the $ODE$ solver.
+\end{itemize}
+\item Finite Difference Schemes
+\begin{itemize}
+\item A meshgrid of points $[X,Y]$ was created to accurately discretize the spatial domain and evaluate the temperature and fuel functions across the entire landscape.
+\item Sparse matrices were generated to efficiently approximate the spatial derivatives (Laplacian and Gradient) at every point $[X,Y]$ within the domain using the central difference method.
+\item Updating boundary values for both the temperature field (Neumann, zero-flux) and the topographical gradient (zero-slope) was implemented to correspond with the physical application requirements of the model.
+\end{itemize}
+\item System of ODEs with Continuous Time
+\begin{itemize}
+\item The Method of Lines (MOL) was applied to convert the partial differential equations ($\text{PDEs}$) into a large linear system of ordinary differential equations ($\text{ODEs}$) that could be solved over time.
+\item I selected an appropriate $\text{ODE}$ solver from $\text{scipy}$, specifically the $\text{RK23}$ method, based on the system's size and the necessity to balance computational cost with solution stability.
+\end{itemize}
+\end{itemize}
+
+\hrule
+
+\subsection*{Extensions}
+\begin{itemize}
+\item Utilize Chebyshev Polynomials instead of Finite Differences
+\begin{itemize}
+\item A significant numerical extension would be to replace the Finite Difference schemes with Chebyshev Polynomials, which are part of the Spectral Methods family, to potentially achieve faster convergence and much higher accuracy for smooth solutions.
+\end{itemize}
+\item Implement Experiment-Based Complexity to Input Equations and Variables
+\begin{itemize}
+\item I made a couple of overly large simplifications when modeling the ignition process and the energy required for the phase change of the fuel; to be truly accurate, I would need to add a third $\text{ODE}$ to explicitly model the moisture content and its evaporation.
+\item My initial conditions defined the surface fuel as equal to $1$ everywhere, representing 'perfect' wildfire conditions; I would like to integrate real-world fuel models from specialized tools such as $\text{FastFuels}$ or $\text{LANDFIRE}$ to increase the model's applicability and customization for varied environments.
+\item My topographical constructions, such as the Gaussian hill, are crude and overly simplistic; a substantial improvement would involve importing $3D$ raster files from the $\text{USGS}$ (Digital Elevation Models or $\text{DEMs}$) to use real-world landscapes for modeling fire start and growth scenarios.
+\end{itemize}
+\item Include Time, Stability, and Complexity Analysis
+\begin{itemize}
+\item A rigorous extension would be to perform a formal Time, Stability, and Complexity Analysis of the numerical scheme, assessing factors like the Courant-Friedrichs-Lewy ($\text{CFL}$) condition and the stiffness of the system.
+\end{itemize}
+\item Optimize for GPU using $\text{CuPy}$ or $\text{TensorFlow}$
+\begin{itemize}
+\item Assuming I make all of the other enhancements listed above, and the scenarios I need to solve expand in size, the resulting system of $\text{ODEs}$ will become computationally expensive very quickly, making acceleration with one or more $\text{GPUs}$ using libraries like $\text{CuPy}$ or $\text{TensorFlow}$ a necessity to significantly reduce the time required per scenario.
+\end{itemize}
+\end{itemize}
+
+\newpage
+
+\section{Figures}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{HillBegin.png}
+    \caption{Initial state of the fire with setup 1.  Left shows an initial spark and the evolution of $u(x,y,t)$ and right shows $\beta(x,y,t)$,  the fuel remaining.}
+    \label{fig:initialState1}
+\end{figure}
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.8\textwidth]{HillMiddle.png}
+    \caption{State of the fire in the middle of the simulation of setup 1.  Left shows the evolution of $u(x,y,t)$ and right shows $\beta(x,y,t)$,  the fuel remaining/consumed.}
+    \label{fig:middleState1}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.8\textwidth]{HillEnd.png}
+    \caption{Final state of the fire with setup 1.  Left shows the evolution of $u(x,y,t)$ and right shows $\beta(x,y,t)$,  the fuel remaining/consumed.}
+    \label{fig:fullState1}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ValleyBegin.png}
+    \caption{Initial state of the fire with setup 2,  a valley mirrored about the y-axis and a new spark location. Left shows an initial spark and the evolution of $u(x,y,t)$ and right shows $\beta(x,y,t)$,  the fuel remaining.}
+    \label{fig:initialState2}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ValleyMiddle.png}
+    \caption{State of the fire in the middle of the simulation with setup 2.  Left shows the evolution of $u(x,y,t)$ and right shows $\beta(x,y,t)$,  the fuel remaining/consumed.}
+    \label{fig:middleState2}
+\end{figure}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.8\textwidth]{ValleyEnd.png}
+    \caption{Final state of the fire with setup 2.  Left shows the evolution of $u(x,y,t)$ and right shows $\beta(x,y,t)$,  the fuel remaining/consumed.}
+    \label{fig:fullState2}
+\end{figure}
+
+\newpage
+\printbibliography
+
+\end{document}
